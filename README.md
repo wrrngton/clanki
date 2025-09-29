@@ -6,4 +6,4 @@ It generates a CSV of `input`, `target` and `image_url` based on the `input` tex
 
 Claude is used as a judge to give the user the best image for the text they wish to translate.
 
-The CVS can be uploaded to Anki via Anki's 'File Upload' feature.
+The CSV can be uploaded to Anki via Anki's 'File Upload' feature.

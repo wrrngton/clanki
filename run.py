@@ -2,24 +2,23 @@ import base64
 import json
 import os
 import pprint
+import sys
 import urllib
+from binascii import Error as BinasciiError
 
+import anthropic
+import certifi
 import httpx
 import requests
-from anthropic import Anthropic
-from anthropic.types import (MessageParam, SearchResultBlockParam,
-                             TextBlockParam)
+from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
 
-placeholder_images = [
-    "https://www.shutterstock.com/image-vector/very-good-grunge-office-rubber-260nw-580204963.jpg",
-    "https://static.vecteezy.com/system/resources/previews/028/087/830/non_2x/trendy-very-good-vector.jpg",
-]
+from validate_b64 import is_valid_base64_image
 
 load_dotenv()
 
-claude_client = Anthropic(api_key=os.getenv("CLAUDE_KEY"))
+claude_client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_KEY"))
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/images/search"
 BRAVE_HEADERS = {
@@ -27,6 +26,7 @@ BRAVE_HEADERS = {
     "Accept-Encoding": "gzip",
     "X-Subscription-Token": os.getenv("BRAVE_KEY"),
 }
+MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
 web_image_search = {
     "name": "image_search",
@@ -44,17 +44,21 @@ web_image_search = {
 }
 
 image_prompt = """
-You are responsible for taking the images above and scoring from 1-10 how well they match the supplied <text> field. 
+You are responsible for taking the images above and scoring from 1-10 how well they match the supplied <text> field.
 
 You must return only an array of integer scores based on how well the supplied image matches the text. Do not include any preamble or conclusions.
 {text}
 
 Here are some examples of what to return:
+For 4 images:
 <example1>
 [1, 2, 9, 4]
 </example1>
+
+For 3 images:
+
 <example2>
-[1, 0, 3, 10]
+[1, 0, 3]
 </example2>
 """
 PREFILL = "["
@@ -71,14 +75,15 @@ def get_image_type(image_url) -> str:
     return file_type
 
 
-def search_web_image(query):
+def search_web_image(query: str):
 
     try:
-        res = requests.get(
+        res = httpx.get(
             BRAVE_URL,
+            verify=certifi.where(),
             headers=BRAVE_HEADERS,
             params={
-                "q": query,
+                "q": translated_text,
                 "count": 10,
                 "search_lang": "en-gb",
                 "safesearch": "strict",
@@ -86,10 +91,11 @@ def search_web_image(query):
         )
         res.raise_for_status()
 
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"Error with image search: {e}")
 
     data = res.json()
+
     images = [
         {
             "url": i.get("properties").get("url"),
@@ -98,43 +104,69 @@ def search_web_image(query):
         for i in data.get("results")
     ]
 
-    translated_text = GoogleTranslator(source="it", target="en").translate(query)
+    images_reduced_list = []
+
+    for img in images:
+        try:
+            req = requests.get(img.get("url"))
+            mtype = req.headers.get("Content-Type")
+            if mtype not in MIME_TYPES:
+                continue
+            images_reduced_list.append(
+                {"url": img.get("url"), "file_type": img.get("file_type")}
+            )
+        except Exception as e:
+            print("Error fetching or encoding image", e)
 
     images_base64_list = [
-        base64.standard_b64encode(httpx.get(img).content).decode("utf-8")
-        for img in images
+        {
+            "base_img_data": base64.standard_b64encode(
+                httpx.get(img.get("url")).content
+            ).decode("utf-8"),
+            "file_type": img.get("file_type"),
+        }
+        for img in images_reduced_list
     ]
+
+    images_base64_list_reduced = [
+        i
+        for i in images_base64_list
+        if is_valid_base64_image(i.get("base_img_data"), i.get("file_type"))
+    ]
+
     images_prompt_data = [
         {
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "image/jpeg",
-                "data": img_data,
+                "media_type": img_data.get("file_type"),
+                "data": img_data.get("base_img_data"),
             },
         }
-        for img_data in images_base64_list
+        for img_data in images_base64_list_reduced
     ]
-
     updated_image_prompt = image_prompt.replace(
         "{text}", f"<text>{translated_text}</text>"
     )
 
-    message = claude_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system="You are an image classifier and rater",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    *images_prompt_data,
-                    {"type": "text", "text": updated_image_prompt},
-                ],
-            },
-            {"role": "assistant", "content": PREFILL},
-        ],
-    )
+    images_prompt_data.append({"type": "text", "text": updated_image_prompt})
+
+    try:
+        message = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            system="You are an image classifier and rater",
+            messages=[
+                {"role": "user", "content": images_prompt_data},
+                {"role": "assistant", "content": PREFILL},
+            ],
+        )
+    except anthropic.APIConnectionError as e:
+        print("The server could not be reached")
+    except anthropic.RateLimitError as e:
+        print("A 429 status code was received; we should back off a bit.")
+    except anthropic.APIStatusError as e:
+        print(e)
 
     final_completion_str = f"{PREFILL}{message.content[0].text}"
     final_completion_list = json.loads(final_completion_str)
@@ -144,8 +176,57 @@ def search_web_image(query):
     return best_image_url
 
 
+def handle_cli() -> str:
+    arguments = sys.argv
+
+    if len(arguments) < 2:
+        sys.stderr.write("Error: you must provide at least one argument")
+        sys.exit(1)
+
+    if arguments[1] != "--file" and arguments[1] != "--F":
+        sys.stderr.write("Error: first argument must be --file or -F")
+        sys.exit(1)
+
+    file_path = arguments[2]
+
+    if not os.path.exists(file_path):
+        sys.stderr.write("Error: your phrases file doesn't exist")
+        sys.exit(1)
+
+    return file_path
+
+
+def read_file(input_file: str) -> list:
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            phrases = [line.strip() for line in f]
+            if not phrases:
+                sys.stderr.write(
+                    "Error: No phrases detected in your phrases file")
+                sys.exit(1)
+            return phrases
+
+    except FileNotFoundError:
+        sys.stderr.write("Error: file not found, check the name and try again")
+        sys.exit(1)
+
+
+def translate_phrases(inputs: list) -> list:
+    sys.stdout.write(f"Translating phrases...\n")
+    translations = []
+    for i in inputs:
+        translated_text = GoogleTranslator(
+            source="it", target="en").translate(i)
+        translations.append(translated_text)
+
+    return translations
+
+
 def run():
-    best_image_match = search_web_image("italy")
+    input_file = handle_cli()
+    input_phrases = read_file(input_file)
+    translated_phrases = translate_phrases(input_phrases)
+    best_image_match = search_web_image("come stai?")
 
 
 if __name__ == "__main__":
