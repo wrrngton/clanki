@@ -7,3 +7,11 @@ It generates a CSV of `input`, `target` and `image_url` based on the `input` tex
 Claude is used as a judge to give the user the best image for the text they wish to translate.
 
 The CSV can be uploaded to Anki via Anki's 'File Upload' feature.
+
+A sample imput is provided in `sample.txt` and an output in `deck.csv`.
+
+It is designed to be run via the command line with one single `file` flag (short: `-F`, long: `--file`). The `file` is an input .txt file of phrases to be translated. 
+
+```console
+░ python3 run.py --file sample.txt
+```

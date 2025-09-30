@@ -1,4 +1,5 @@
 import base64
+import csv
 import json
 import os
 import pprint
@@ -75,105 +76,110 @@ def get_image_type(image_url) -> str:
     return file_type
 
 
-def search_web_image(query: str):
+def search_web_image(phrases: list) -> list:
+    sys.stdout.write(f"Generating images...\n")
+    image_matches = []
+    for phrase in phrases:
 
-    try:
-        res = httpx.get(
-            BRAVE_URL,
-            verify=certifi.where(),
-            headers=BRAVE_HEADERS,
-            params={
-                "q": translated_text,
-                "count": 10,
-                "search_lang": "en-gb",
-                "safesearch": "strict",
-            },
-        )
-        res.raise_for_status()
-
-    except Exception as e:
-        print(f"Error with image search: {e}")
-
-    data = res.json()
-
-    images = [
-        {
-            "url": i.get("properties").get("url"),
-            "file_type": f"image/{get_image_type(i.get("properties").get("url"))}",
-        }
-        for i in data.get("results")
-    ]
-
-    images_reduced_list = []
-
-    for img in images:
         try:
-            req = requests.get(img.get("url"))
-            mtype = req.headers.get("Content-Type")
-            if mtype not in MIME_TYPES:
-                continue
-            images_reduced_list.append(
-                {"url": img.get("url"), "file_type": img.get("file_type")}
+            res = httpx.get(
+                BRAVE_URL,
+                verify=certifi.where(),
+                headers=BRAVE_HEADERS,
+                params={
+                    "q": phrase,
+                    "count": 10,
+                    "search_lang": "en-gb",
+                    "safesearch": "strict",
+                },
             )
+            res.raise_for_status()
+
         except Exception as e:
-            print("Error fetching or encoding image", e)
+            print(f"Error with image search: {e}")
 
-    images_base64_list = [
-        {
-            "base_img_data": base64.standard_b64encode(
-                httpx.get(img.get("url")).content
-            ).decode("utf-8"),
-            "file_type": img.get("file_type"),
-        }
-        for img in images_reduced_list
-    ]
+        data = res.json()
 
-    images_base64_list_reduced = [
-        i
-        for i in images_base64_list
-        if is_valid_base64_image(i.get("base_img_data"), i.get("file_type"))
-    ]
+        images = [
+            {
+                "url": i.get("properties").get("url"),
+                "file_type": f"image/{get_image_type(i.get("properties").get("url"))}",
+            }
+            for i in data.get("results")
+        ]
 
-    images_prompt_data = [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img_data.get("file_type"),
-                "data": img_data.get("base_img_data"),
-            },
-        }
-        for img_data in images_base64_list_reduced
-    ]
-    updated_image_prompt = image_prompt.replace(
-        "{text}", f"<text>{translated_text}</text>"
-    )
+        images_reduced_list = []
 
-    images_prompt_data.append({"type": "text", "text": updated_image_prompt})
+        for img in images:
+            try:
+                req = requests.get(img.get("url"))
+                mtype = req.headers.get("Content-Type")
+                if mtype not in MIME_TYPES:
+                    continue
+                images_reduced_list.append(
+                    {"url": img.get("url"), "file_type": img.get("file_type")}
+                )
+            except Exception as e:
+                print("Error fetching or encoding image", e)
 
-    try:
-        message = claude_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            system="You are an image classifier and rater",
-            messages=[
-                {"role": "user", "content": images_prompt_data},
-                {"role": "assistant", "content": PREFILL},
-            ],
-        )
-    except anthropic.APIConnectionError as e:
-        print("The server could not be reached")
-    except anthropic.RateLimitError as e:
-        print("A 429 status code was received; we should back off a bit.")
-    except anthropic.APIStatusError as e:
-        print(e)
+        images_base64_list = [
+            {
+                "base_img_data": base64.standard_b64encode(
+                    httpx.get(img.get("url")).content
+                ).decode("utf-8"),
+                "file_type": img.get("file_type"),
+            }
+            for img in images_reduced_list
+        ]
 
-    final_completion_str = f"{PREFILL}{message.content[0].text}"
-    final_completion_list = json.loads(final_completion_str)
-    max_score = max(final_completion_list)
-    best_image_index = final_completion_list.index(max_score)
-    best_image_url = images[best_image_index]
-    return best_image_url
+        images_base64_list_reduced = [
+            i
+            for i in images_base64_list
+            if is_valid_base64_image(i.get("base_img_data"), i.get("file_type"))
+        ]
+
+        images_prompt_data = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img_data.get("file_type"),
+                    "data": img_data.get("base_img_data"),
+                },
+            }
+            for img_data in images_base64_list_reduced
+        ]
+        updated_image_prompt = image_prompt.replace(
+            "{text}", f"<text>{phrase}</text>")
+
+        images_prompt_data.append(
+            {"type": "text", "text": updated_image_prompt})
+
+        try:
+            message = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1000,
+                system="You are an image classifier and rater",
+                messages=[
+                    {"role": "user", "content": images_prompt_data},
+                    {"role": "assistant", "content": PREFILL},
+                ],
+            )
+        except anthropic.APIConnectionError as e:
+            print("The server could not be reached")
+        except anthropic.RateLimitError as e:
+            print("A 429 status code was received; we should back off a bit.")
+        except anthropic.APIStatusError as e:
+            print(e)
+
+        final_completion_str = f"{PREFILL}{message.content[0].text}"
+        final_completion_list = json.loads(final_completion_str)
+        max_score = max(final_completion_list)
+        best_image_index = final_completion_list.index(max_score)
+        best_image_url = images[best_image_index]
+        image_matches.append(best_image_url)
+
+    return image_matches
 
 
 def handle_cli() -> str:
@@ -222,11 +228,35 @@ def translate_phrases(inputs: list) -> list:
     return translations
 
 
+def generate_output(
+    original_phrases: list, translated_phrases: list, images: list
+) -> None:
+    csv_output = []
+    phrase_len = len(original_phrases)
+
+    for i in range(0, phrase_len):
+        phrase_dict = {
+            "front": translated_phrases[i],
+            "back": original_phrases[i],
+            "image": f"""<img src='{images[i].get("url")}'/>""",
+        }
+
+        csv_output.append(phrase_dict)
+
+    df = open("deck.csv", "w+", encoding="utf-8")
+    cw = csv.writer(df)
+    for row in csv_output:
+        cw.writerow(row.values())
+
+    df.close()
+
+
 def run():
     input_file = handle_cli()
     input_phrases = read_file(input_file)
     translated_phrases = translate_phrases(input_phrases)
-    best_image_match = search_web_image("come stai?")
+    best_image_matches = search_web_image(translated_phrases)
+    generate_output(input_phrases, translated_phrases, best_image_matches)
 
 
 if __name__ == "__main__":

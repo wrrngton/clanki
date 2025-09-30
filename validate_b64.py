@@ -1,28 +1,3 @@
-# import base64, io
-# from PIL import Image
-#
-# def validate_base64_image(b64: str, claimed_mime: str):
-#     if b64.startswith("data:"):
-#         b64 = b64.split(",", 1)[1]
-#
-#     try:
-#         raw = base64.b64decode(b64, validate=True)
-#     except Exception as e:
-#         raise ValueError(f"Invalid base64: {e}")
-#
-#     try:
-#         im = Image.open(io.BytesIO(raw))
-#         im.verify()
-#         fmt = (im.format or "").lower()
-#     except Exception as e:
-#         raise ValueError(f"Corrupt/unreadable image bytes: {e}")
-#
-#     expected = {"jpeg":"image/jpeg","jpg":"image/jpeg","png":"image/png","gif":"image/gif","webp":"image/webp"}.get(fmt, None)
-#     if expected and expected != claimed_mime.lower():
-#         raise ValueError(f"MIME mismatch: claimed {claimed_mime}, detected {expected}")
-#
-#     return b64
-#
 import base64
 import io
 
