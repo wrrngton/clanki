@@ -2,7 +2,6 @@ import base64
 import csv
 import json
 import os
-import pprint
 import sys
 import time
 import urllib
@@ -10,7 +9,6 @@ from binascii import Error as BinasciiError
 
 import anthropic
 import certifi
-import httpx
 import requests
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from deep_translator import GoogleTranslator
@@ -105,7 +103,7 @@ def search_web_image(phrases: list) -> list:
         except Exception as e:
             print(f"Another error occurred: {e}")
 
-        # Is user opts out of AI, Claude isn't called and we rely on Brave's confidence score, images immediately returned
+        # If user opts out of AI, Claude isn't called and we rely on Brave's confidence score, images immediately returned
         if not use_ai:
             eligible_images = []
             for i in data.get("results"):
@@ -158,7 +156,7 @@ def search_web_image(phrases: list) -> list:
         images_base64_list = [
             {
                 "base_img_data": base64.standard_b64encode(
-                    httpx.get(img.get("url")).content
+                    requests.get(img.get("url")).content
                 ).decode("utf-8"),
                 "file_type": img.get("file_type"),
             }
@@ -296,7 +294,7 @@ def run():
     input_file = handle_cli()
     input_phrases = read_file(input_file)
     translated_phrases = translate_phrases(input_phrases)
-    best_image_matches = search_web_image(input_phrases)
+    best_image_matches = search_web_image(translated_phrases)
     generate_output(input_phrases, translated_phrases, best_image_matches)
     sys.stdout.write(
         f"Congrats! your deck.csv has been successfully created...\n")
