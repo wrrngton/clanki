@@ -15,3 +15,9 @@ It is designed to be run via the command line with one single `file` flag (short
 ```console
 ░ python3 run.py --file sample.txt
 ```
+
+Claude image judgements can be skipped in favour of the images API's own confidence score, you can use `--ai` flag set to `false`.
+
+```console
+░ python3 run.py --file sample.txt --ai false
+```

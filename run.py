@@ -4,6 +4,7 @@ import json
 import os
 import pprint
 import sys
+import time
 import urllib
 from binascii import Error as BinasciiError
 
@@ -20,6 +21,7 @@ from validate_b64 import is_valid_base64_image
 load_dotenv()
 
 claude_client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_KEY"))
+use_ai = True
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/images/search"
 BRAVE_HEADERS = {
@@ -49,6 +51,7 @@ For 3 images:
 """
 PREFILL = "["
 
+
 def get_image_type(image_url) -> str:
     parsed_url = urllib.parse.urlsplit(image_url)
     path_split = parsed_url.path.split(".")
@@ -60,29 +63,75 @@ def get_image_type(image_url) -> str:
     return file_type
 
 
+def brave_img_search(phrase: str) -> str:
+    try:
+        res = requests.get(
+            BRAVE_URL,
+            verify=certifi.where(),
+            headers=BRAVE_HEADERS,
+            params={
+                "q": phrase,
+                "count": 20,
+                "search_lang": "en-gb",
+                "safesearch": "strict",
+            },
+        )
+        res.raise_for_status()
+        return res.json()
+
+    except requests.exceptions.HTTPError as e:
+        raise
+
+    except Exception as e:
+        raise
+
+
 def search_web_image(phrases: list) -> list:
     sys.stdout.write(f"Generating images...\n")
     image_matches = []
-    for phrase in phrases:
 
+    for phrase in phrases:
         try:
-            res = httpx.get(
-                BRAVE_URL,
-                verify=certifi.where(),
-                headers=BRAVE_HEADERS,
-                params={
-                    "q": phrase,
-                    "count": 10,
-                    "search_lang": "en-gb",
-                    "safesearch": "strict",
-                },
-            )
-            res.raise_for_status()
+            data = brave_img_search(phrase)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                print("hit rate limit, back off")
+                time.sleep(1)
+                data = brave_img_search(phrase)
+            else:
+                print(f"HTTPError: {e}")
+                return None
 
         except Exception as e:
-            print(f"Error with image search: {e}")
+            print(f"Another error occurred: {e}")
 
-        data = res.json()
+        # Is user opts out of AI, Claude isn't called and we rely on Brave's confidence score, images immediately returned
+        if not use_ai:
+            eligible_images = []
+            for i in data.get("results"):
+                img_dict = {"url": "", "file_type": ""}
+
+                if i.get("confidence") == "high":
+                    img_dict["url"] = i.get("properties").get("url")
+                    img_dict["file_type"] = (
+                        get_image_type(i.get("properties").get("url")),
+                    )
+                elif i.get("confidence") == "medium":
+                    img_dict["url"] = i.get("properties").get("url")
+                    img_dict["file_type"] = (
+                        get_image_type(i.get("properties").get("url")),
+                    )
+                else:
+                    img_dict["url"] = i.get("properties").get("url")
+                    img_dict["file_type"] = (
+                        get_image_type(i.get("properties").get("url")),
+                    )
+
+                eligible_images.append(img_dict)
+
+            chosen_image = eligible_images[0]
+            image_matches.append(chosen_image)
+            continue  # break from parent loop
 
         images = [
             {
@@ -167,15 +216,22 @@ def search_web_image(phrases: list) -> list:
 
 
 def handle_cli() -> str:
+    global use_ai
     arguments = sys.argv
+    arg_length = len(arguments)
 
-    if len(arguments) < 2:
+    if arg_length < 2:
         sys.stderr.write("Error: you must provide at least one argument")
         sys.exit(1)
 
     if arguments[1] != "--file" and arguments[1] != "--F":
         sys.stderr.write("Error: first argument must be --file or -F")
         sys.exit(1)
+
+    if arg_length == 5:
+        ai_bool = arguments[4]
+        if ai_bool == "false":
+            use_ai = False
 
     file_path = arguments[2]
 
@@ -240,7 +296,7 @@ def run():
     input_file = handle_cli()
     input_phrases = read_file(input_file)
     translated_phrases = translate_phrases(input_phrases)
-    best_image_matches = search_web_image(translated_phrases)
+    best_image_matches = search_web_image(input_phrases)
     generate_output(input_phrases, translated_phrases, best_image_matches)
     sys.stdout.write(
         f"Congrats! your deck.csv has been successfully created...\n")
