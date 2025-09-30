@@ -29,21 +29,6 @@ BRAVE_HEADERS = {
 }
 MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
-web_image_search = {
-    "name": "image_search",
-    "description": "A tool to search the internet for images",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "the search query",
-            }
-        },
-        "required": ["query"],
-    },
-}
-
 image_prompt = """
 You are responsible for taking the images above and scoring from 1-10 how well they match the supplied <text> field.
 
@@ -63,7 +48,6 @@ For 3 images:
 </example2>
 """
 PREFILL = "["
-
 
 def get_image_type(image_url) -> str:
     parsed_url = urllib.parse.urlsplit(image_url)
