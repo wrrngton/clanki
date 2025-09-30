@@ -231,6 +231,7 @@ def translate_phrases(inputs: list) -> list:
 def generate_output(
     original_phrases: list, translated_phrases: list, images: list
 ) -> None:
+    sys.stdout.write(f"Generating csv...\n")
     csv_output = []
     phrase_len = len(original_phrases)
 
@@ -257,6 +258,8 @@ def run():
     translated_phrases = translate_phrases(input_phrases)
     best_image_matches = search_web_image(translated_phrases)
     generate_output(input_phrases, translated_phrases, best_image_matches)
+    sys.stdout.write(
+        f"Congrats! your deck.csv has been successfully created...\n")
 
 
 if __name__ == "__main__":
