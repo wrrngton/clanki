@@ -21,3 +21,10 @@ Claude image judgements can be skipped in favour of the images API's own confide
 ```console
 ░ python3 run.py --file sample.txt --ai false
 ```
+
+## To do
+
+- [x] Use Claude to decide the right query to pass to Brave
+- [ ] CLI flags for language selection
+- [ ] CLI flags for output file
+

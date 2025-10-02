@@ -10,16 +10,17 @@ from binascii import Error as BinasciiError
 import anthropic
 import certifi
 import requests
-from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
 
+from llm import LLMClient
+from prompts import image_prompt, phrase_prompt, phrase_prompt_prefill
 from validate_b64 import is_valid_base64_image
 
 load_dotenv()
 
-claude_client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_KEY"))
 use_ai = True
+
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/images/search"
 BRAVE_HEADERS = {
@@ -29,24 +30,6 @@ BRAVE_HEADERS = {
 }
 MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
 
-image_prompt = """
-You are responsible for taking the images above and scoring from 1-10 how well they match the supplied <text> field.
-
-You must return only an array of integer scores based on how well the supplied image matches the text. Do not include any preamble or conclusions.
-{text}
-
-Here are some examples of what to return:
-For 4 images:
-<example1>
-[1, 2, 9, 4]
-</example1>
-
-For 3 images:
-
-<example2>
-[1, 0, 3]
-</example2>
-"""
 PREFILL = "["
 
 
@@ -77,11 +60,37 @@ def brave_img_search(phrase: str) -> str:
         res.raise_for_status()
         return res.json()
 
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         raise
 
-    except Exception as e:
+    except Exception:
         raise
+
+
+def classify_phrase(phrases: list) -> str:
+    phrase_prompt_data = phrase_prompt.replace("{text}", str(phrases))
+    phrase_prompt_data = phrase_prompt_data.replace("{source_language}", "italian")
+    llm_api = LLMClient()
+    messages = [
+        {"role": "user", "content": phrase_prompt_data},
+        {"role": "assistant", "content": "["},
+    ]
+
+    try:
+        message = llm_api.fetch(
+            "claude-sonnet-4-20250514", 1000, "you are a phrase classifier", messages
+        )
+        final_completion_str = f"{phrase_prompt_prefill}{
+            message.content[0].text}"
+        final_completion_list = json.loads(final_completion_str)
+        return final_completion_str
+
+    except anthropic.APIConnectionError as e:
+        print("The server could not be reached", e)
+    except anthropic.RateLimitError:
+        print("A 429 status code was received; we should back off a bit.")
+    except anthropic.APIStatusError as e:
+        print("Another issues occurred: ", e)
 
 
 def search_web_image(phrases: list) -> list:
@@ -93,8 +102,8 @@ def search_web_image(phrases: list) -> list:
             data = brave_img_search(phrase)
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
-                print("hit rate limit, back off")
-                time.sleep(1)
+                print("hit rate limit, back off", e)
+                time.sleep(2)
                 data = brave_img_search(phrase)
             else:
                 print(f"HTTPError: {e}")
@@ -180,21 +189,21 @@ def search_web_image(phrases: list) -> list:
             }
             for img_data in images_base64_list_reduced
         ]
-        updated_image_prompt = image_prompt.replace(
-            "{text}", f"<text>{phrase}</text>")
+        updated_image_prompt = image_prompt.replace("{text}", f"<text>{phrase}</text>")
 
-        images_prompt_data.append(
-            {"type": "text", "text": updated_image_prompt})
+        images_prompt_data.append({"type": "text", "text": updated_image_prompt})
+        messages = [
+            {"role": "user", "content": images_prompt_data},
+            {"role": "assistant", "content": PREFILL},
+        ]
 
         try:
-            message = claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1000,
-                system="You are an image classifier and rater",
-                messages=[
-                    {"role": "user", "content": images_prompt_data},
-                    {"role": "assistant", "content": PREFILL},
-                ],
+            llm_client = LLMClient()
+            message = llm_client.fetch(
+                "claude-sonnet-4-20250514",
+                1024,
+                "You are an image classifier and rater",
+                messages,
             )
         except anthropic.APIConnectionError as e:
             print("The server could not be reached")
@@ -245,8 +254,7 @@ def read_file(input_file: str) -> list:
         with open(input_file, "r", encoding="utf-8") as f:
             phrases = [line.strip() for line in f]
             if not phrases:
-                sys.stderr.write(
-                    "Error: No phrases detected in your phrases file")
+                sys.stderr.write("Error: No phrases detected in your phrases file")
                 sys.exit(1)
             return phrases
 
@@ -259,15 +267,14 @@ def translate_phrases(inputs: list) -> list:
     sys.stdout.write(f"Translating phrases...\n")
     translations = []
     for i in inputs:
-        translated_text = GoogleTranslator(
-            source="it", target="en").translate(i)
+        translated_text = GoogleTranslator(source="it", target="en").translate(i)
         translations.append(translated_text)
 
     return translations
 
 
 def generate_output(
-    original_phrases: list, translated_phrases: list, images: list
+    original_phrases: list, translated_phrases: list, images: list, input_file: str
 ) -> None:
     sys.stdout.write(f"Generating csv...\n")
     csv_output = []
@@ -281,23 +288,27 @@ def generate_output(
         }
 
         csv_output.append(phrase_dict)
-
-    df = open("deck.csv", "w+", encoding="utf-8")
+    of = input_file.split(".")[0]
+    df = open(f"{of}.csv", "w+", encoding="utf-8")
     cw = csv.writer(df)
     for row in csv_output:
         cw.writerow(row.values())
 
     df.close()
+    sys.stdout.write(
+        f"Congrats! your {
+            input_file} has been successfully translated into a CSV...\n"
+    )
 
 
 def run():
     input_file = handle_cli()
     input_phrases = read_file(input_file)
+
     translated_phrases = translate_phrases(input_phrases)
-    best_image_matches = search_web_image(translated_phrases)
-    generate_output(input_phrases, translated_phrases, best_image_matches)
-    sys.stdout.write(
-        f"Congrats! your deck.csv has been successfully created...\n")
+    optimised_search_phrases = classify_phrase(input_phrases)
+    best_image_matches = search_web_image(optimised_search_phrases)
+    generate_output(input_phrases, translated_phrases, best_image_matches, input_file)
 
 
 if __name__ == "__main__":
