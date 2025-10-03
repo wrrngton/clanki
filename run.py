@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from cli import cli_handle_error
 from llm import LLMClient
-from prompts import image_prompt, phrase_prompt, phrase_prompt_prefill
+from prompts import image_prompt, phrase_prompt
 from validate_b64 import is_valid_base64_image
 
 load_dotenv()
@@ -75,18 +75,16 @@ def classify_phrase(phrases: list) -> str:
         "{source_language}", "italian")
     llm_api = LLMClient()
     messages = [
-        {"role": "user", "content": phrase_prompt_data},
-        {"role": "assistant", "content": "["},
+        {"role": "user", "content": phrase_prompt_data}
     ]
 
     try:
         message = llm_api.fetch(
             "claude-sonnet-4-20250514", 1000, "you are a phrase classifier", messages
         )
-        final_completion_str = f"{phrase_prompt_prefill}{
-            message.content[0].text}"
+        final_completion_str = message.content[0].text
         final_completion_list = json.loads(final_completion_str)
-        return final_completion_str
+        return final_completion_list
 
     except anthropic.APIConnectionError as e:
         print("The server could not be reached", e)
@@ -106,7 +104,7 @@ def search_web_image(phrases: list) -> list:
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
                 print("hit rate limit, back off", e)
-                time.sleep(2)
+                time.sleep(1)
                 data = brave_img_search(phrase)
             else:
                 print(f"HTTPError: {e}")
