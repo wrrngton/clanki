@@ -2,3 +2,5 @@
 catcert.perm
 __pycache__/
 .venv/
+*.txt
+*.csv

@@ -2,6 +2,7 @@ import base64
 import csv
 import json
 import os
+import pathlib
 import sys
 import time
 import urllib
@@ -13,6 +14,7 @@ import requests
 from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
 
+from cli import cli_handle_error
 from llm import LLMClient
 from prompts import image_prompt, phrase_prompt, phrase_prompt_prefill
 from validate_b64 import is_valid_base64_image
@@ -69,7 +71,8 @@ def brave_img_search(phrase: str) -> str:
 
 def classify_phrase(phrases: list) -> str:
     phrase_prompt_data = phrase_prompt.replace("{text}", str(phrases))
-    phrase_prompt_data = phrase_prompt_data.replace("{source_language}", "italian")
+    phrase_prompt_data = phrase_prompt_data.replace(
+        "{source_language}", "italian")
     llm_api = LLMClient()
     messages = [
         {"role": "user", "content": phrase_prompt_data},
@@ -189,9 +192,11 @@ def search_web_image(phrases: list) -> list:
             }
             for img_data in images_base64_list_reduced
         ]
-        updated_image_prompt = image_prompt.replace("{text}", f"<text>{phrase}</text>")
+        updated_image_prompt = image_prompt.replace(
+            "{text}", f"<text>{phrase}</text>")
 
-        images_prompt_data.append({"type": "text", "text": updated_image_prompt})
+        images_prompt_data.append(
+            {"type": "text", "text": updated_image_prompt})
         messages = [
             {"role": "user", "content": images_prompt_data},
             {"role": "assistant", "content": PREFILL},
@@ -250,24 +255,54 @@ def handle_cli() -> str:
 
 
 def read_file(input_file: str) -> list:
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            phrases = [line.strip() for line in f]
-            if not phrases:
-                sys.stderr.write("Error: No phrases detected in your phrases file")
-                sys.exit(1)
-            return phrases
+    path = pathlib.Path(input_file)
+    extension = path.suffix
 
-    except FileNotFoundError:
-        sys.stderr.write("Error: file not found, check the name and try again")
-        sys.exit(1)
+    if extension != ".txt" and extension != ".csv":
+        cli_handle_error("File type must of be '.txt' or '.csv'", 1)
+
+    if extension == ".txt":
+        try:
+            with open(input_file, "r", encoding="utf-8") as f:
+                phrases = [line.strip() for line in f]
+                if not phrases:
+                    cli_handle_error(
+                        "Error: no phrases detected in your phrases file", 1
+                    )
+                return phrases
+
+        except FileNotFoundError:
+            cli_handle_error(
+                "Error: file not found, check name and try again", 1)
+
+    if extension == ".csv":
+        try:
+            with open(input_file, "r", newline="", encoding="utf-8") as c:
+                phrases = []
+                phrasereader = csv.reader(c, delimiter=",")
+                for row in phrasereader:
+                    if len(row) > 1:
+                        cli_handle_error(
+                            "CSV files should only have one column containing phrases, delete any additional columns",
+                            1,
+                        )
+                    else:
+                        phrases.append(row[0])
+
+                return phrases
+
+        except FileNotFoundError:
+            sys.stderr.write(
+                "Error: file not found, check the name and try again")
+            sys.exit(1)
 
 
 def translate_phrases(inputs: list) -> list:
     sys.stdout.write(f"Translating phrases...\n")
     translations = []
     for i in inputs:
-        translated_text = GoogleTranslator(source="it", target="en").translate(i)
+        translated_text = GoogleTranslator(
+            source="it", target="en").translate(i)
         translations.append(translated_text)
 
     return translations
@@ -308,7 +343,8 @@ def run():
     translated_phrases = translate_phrases(input_phrases)
     optimised_search_phrases = classify_phrase(input_phrases)
     best_image_matches = search_web_image(optimised_search_phrases)
-    generate_output(input_phrases, translated_phrases, best_image_matches, input_file)
+    generate_output(input_phrases, translated_phrases,
+                    best_image_matches, input_file)
 
 
 if __name__ == "__main__":
