@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="hero">
+        <h1 class="hero-title">Turn phrases into<br><span class="highlight">anki flashcards</span></h1>
+        <p class="hero-subtitle">Input a list of phrases or upload a .txt or .csv file.</p>
+    </div>
+
+    <form id="translation-form" action="/create-cards" method="POST" enctype="multipart/form-data" class="form">
+        <div class="form-main">
+            <div class="textarea-container">
+                <textarea
+                    id="phrases-textarea"
+                    name="phrases"
+                    placeholder="ciao mondo ✨
+mi piace la pizza
+dove è la biblioteca?"
+                    rows="8"
+                    class="textarea"
+                ></textarea>
+                <div class="textarea-hint">Try a few phrases to get started</div>
+            </div>
+
+            <button type="submit" id="submit-btn" class="btn-primary" disabled>
+                <span id="submit-text">Generate Cards</span>
+                <span id="loading-spinner" class="loading-spinner" style="display: none;">
+                    <span class="spinner"></span>
+                    Processing...
+                </span>
+            </button>
+        </div>
+
+        <div class="form-options">
+            <div class="file-upload-section">
+                <span class="option-label">Got a long list? 📄</span>
+                <div class="file-upload">
+                    <input type="file" id="file-upload" name="file" accept=".txt,.csv">
+                    <label for="file-upload" class="file-upload-label">Upload .txt or .csv</label>
+                    <div class="file-info">
+                        <span id="file-name" class="file-name"></span>
+                        <button type="button" id="clear-file" class="clear-file-btn" style="display: none;">×</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ai-toggle-section">
+                <label class="toggle-container">
+                    <input type="checkbox" id="use-ai" name="use_ai" checked>
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-text">Smart image matching</span>
+                    <span class="toggle-hint">(slower but better)</span>
+                </label>
+            </div>
+        </div>
+
+        <div id="error-message" class="error-message" style="display: none;">
+            <p id="error-text"></p>
+        </div>
+    </form>
+</div>
+{% endblock %}
